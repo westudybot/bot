@@ -19,6 +19,9 @@
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters
 from telegram import KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram import ReplyKeyboardMarkup, ReplyKeyboardRemove
+from http import client as http
+import MySQLdb
+import operator
 
 import logging
 
@@ -28,67 +31,162 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 
 logger = logging.getLogger(__name__)
 
+class Status:
+    stato = 0
+
 class QuestionSearch:
-    
-    def __init__(self):
-        pass
+    conn = MySQLdb.connect("localhost", port=3306, user="gianmarco", passwd="", db="bot")
     def lookup(self, title):
-        pass
+        cursor= self.conn.cursor()
+        matches = {}
+        titoli = []
+        for w in title.split():
+            cursor.execute("""
+SELECT ID FROM Domande
+            WHERE MATCH (titolo, testo)
+            AGAINST ('%s' IN NATURAL LANGUAGE MODE);
+            """ % title)
+            rows = cursor.fetchall()
+            for row in rows:
+                if row[0] not in matches:
+                    matches[row[0]] = 1
+                else:
+                    matches[row[0]] +=1
+            if len(matches) > 3:
+                sorted_ = sorted(matches.items(), key=operator.itemgetter(1), reverse=True)
+                IDs =  [i[0] for i in sorted_[0:3]]
+            else:
+                IDs = matches.keys()
+        for ID in IDs:
+            cursor.execute("""
+SELECT titolo FROM Domande
+            WHERE ID = %d;
+            """ % ID
+                )
+            titoli.append(cursor.fetchone()[0])
+        cursor.close()
+        return titoli
+
+    
+    def insert(self, chatid, text):
+        cursor = self.conn.cursor()
+        cursor.execute("""
+SELECT ID FROM Utenti
+WHERE ID = %d;
+        """ % chatid)
+        if cursor.fetchone() == None:
+            cursor.execute("""
+            INSERT INTO Utenti (ID, punti, ndomande, nrisposte)
+            VALUES (%d, 0, 1, 0);
+            """ % chatid)
+        cursor.execute("""
+        INSERT INTO Domande (titolo)
+        VALUES ('%s');
+        """ % text)
+        cursor.execute("""
+        INSERT INTO Post (utente, domanda, data)
+        VALUES (
+        %d, (SELECT MAX(ID) FROM Domande), CURDATE());
+        """ % chatid)
+        cursor.close()
+        self.conn.commit()
         
+    def domanda_random(self):
+        cursor = self.conn.cursor()
+        cursor.execute("""
+SELECT titolo FROM domande
+WHERE ID NOT IN 
+    ( SELECT domanda FROM Risposte
+      WHERE flag = true
+    );
+        """)
+        
+#    def retrieve(self, )
+
 
 class Conversation:
     states = {}
     STARTED = 0
     CHIEDI = 1
     RISPONDI = 2
-    
+    SELEZIONE_DOMANDA = 3
+
+    db = QuestionSearch()
     
     def messages_handler(self, bot, update):
-        if self.states[update.message.chat.id] == None:
-            self.states[update.message.chat.id] = self.STARTED
-        elif self.states[update.message.chat.id] == self.STARTED:
+        if update.message.chat.id not in self.states:
+            self.start(bot, update)
+        elif self.states[update.message.chat.id].stato == self.STARTED:
             if update.message.text == "CHIEDI":
-                self.states[update.message.chat.id] = self.CHIEDI
+                self.states[update.message.chat.id].stato = self.CHIEDI
                 reply_markup = ReplyKeyboardRemove(selective=False)
                 update.message.reply_text("Inserisci la tua domanda:", reply_markup=reply_markup)
             elif update.message.text == "RISPONDI":
-                self.states[update.message.chat.id] = self.RISPONDI
+                self.states[update.message.chat.id].stato = self.RISPONDI
                 reply_markup = ReplyKeyboardRemove(selective=False)
                 update.message.reply_text("Ecco il quesito:", reply_markup=reply_markup)
                 self.rispondi(update)
             else:
                 update.message.reply_text("Premi /help per aiuto")
-        elif self.states[update.message.chat.id] == self.CHIEDI:
+        elif self.states[update.message.chat.id].stato == self.CHIEDI:
             self.chiedi(update)
-        elif self.states[update.message.chat.id] == self.RISPONDI:
+        elif self.states[update.message.chat.id].stato == self.RISPONDI:
             self.rispondi(update)
+        elif self.states[update.message.chat.id].stato == self.SELEZIONE_DOMANDA:
+            self.selezione(update)
 
     def chiedi(self, update):
-        pass
+        results = self.db.lookup(update.message.text)
+        if len(results) > 0:
+            message = """Sono state trovate alcune domande simili alla tua.
+Seleziona quella più adatta oppure inserisci la domanda
+"""
+            buttons = []
+            for r in results:
+                #TODO: InlineKeyboardButton
+                buttons.append([KeyboardButton(r)])
+            buttons.append([KeyboardButton("AGGIUNGI")])
+            markup = ReplyKeyboardMarkup(buttons)
+            self.states[update.message.chat.id].stato = self.SELEZIONE_DOMANDA
+            self.states[update.message.chat.id].messaggio = update.message.text
+            update.message.reply_text(message, reply_markup=markup)
+        else:
+            message = """
+Non sono state trovate domande simili.
+La tua domanda è stata aggiunta al database.
+Sarai notificato se qualcuno risponderà alla tua domanda
+"""
+            self.db.insert(update.message.chat.id, update.message.text)
+            update.message.reply_text(message)
 
+    def selezione(self, update):
+        if update.message.text == "AGGIUNGI":
+            message = """
+La tua domanda è stata aggiunta al database.
+Sarai notificato se qualcuno risponderà alla tua domanda
+"""
+            self.db.insert(update.message.chat.id, self.states[update.message.chat.id].messaggio)
+            reply_markup = ReplyKeyboardRemove(selective=False)
+            update.message.reply_text(message, reply_markup=reply_markup)
+            
+        else:
+            #cerca nel db la risposta
+            pass
+    
     def rispondi(self, update):
-        pass
+        #domanda scelta casualmente
+        
 
     def start(self, bot, update):
         update.message.reply_text("Salve " + update.message.from_user.first_name)
         
-        keyboard = [[KeyboardButton("CHIEDI"),
-                     KeyboardButton("RISPONDI")]]
+        keyboard = [[KeyboardButton("CHIEDI")],
+                     [KeyboardButton("RISPONDI")]]
 
         reply_markup = ReplyKeyboardMarkup(keyboard)
         update.message.reply_text('Cosa vuoi fare?', reply_markup=reply_markup)
-        self.states[update.message.chat.id] = self.STARTED
+        self.states[update.message.chat.id] = Status()
         
-    def problems(self, bot, update):
-    
-        keyboard = [[KeyboardButton("CHIEDI"),
-                     KeyboardButton("RISPONDI")]]
-
-        reply_markup = ReplyKeyboardMarkup(keyboard)
-        update.message.reply_text('Please choose:', reply_markup=reply_markup)
-
-    
-
     def help(self, bot, update):
         update.message.reply_text("/problems -> Chiedi domanda - Fai domanda")
 
@@ -103,7 +201,6 @@ def main():
     
     # Gestione messaegi ricevuti
     dp.add_handler(MessageHandler(Filters.text, c.messages_handler))
-    dp.add_handler(CommandHandler('problems', c.problems))
     dp.add_handler(CommandHandler('start', c.start))
     dp.add_handler(CommandHandler('help', c.help))
 
