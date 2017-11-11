@@ -73,7 +73,7 @@ class Conversation:
 
 def main():
     
-    updater = Updater("474629018:AAFylYi5Zjh9P4fA4L_qawnd_SxLl9YlZ4I")
+    updater = Updater("493355727:AAGLJSKPNRod7zflj1pD23EQxiUoDRqivnA")
     
     # Creazione del dispatcher, a cui verranno assegnati i metodi di risposta
     dp = updater.dispatcher
