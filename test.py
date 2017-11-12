@@ -22,6 +22,7 @@ from telegram import ReplyKeyboardMarkup, ReplyKeyboardRemove
 from http import client as http
 import MySQLdb
 import operator
+import random
 
 import logging
 
@@ -36,8 +37,9 @@ class Status:
 
 class QuestionSearch:
     conn = MySQLdb.connect("localhost", port=3306, user="gianmarco", passwd="", db="bot")
+    cursor = conn.cursor()
     def lookup(self, title):
-        cursor= self.conn.cursor()
+        cursor= self.cursor
         matches = {}
         titoli = []
         for w in title.split():
@@ -64,12 +66,11 @@ SELECT titolo FROM Domande
             """ % ID
                 )
             titoli.append(cursor.fetchone()[0])
-        cursor.close()
         return titoli
 
     
     def insert(self, chatid, text):
-        cursor = self.conn.cursor()
+        cursor = self.cursor
         cursor.execute("""
 SELECT ID FROM Utenti
 WHERE ID = %d;
@@ -79,6 +80,12 @@ WHERE ID = %d;
             INSERT INTO Utenti (ID, punti, ndomande, nrisposte)
             VALUES (%d, 0, 1, 0);
             """ % chatid)
+        else:
+            cursor.execute("""
+UPDATE Utenti
+SET ndomande = ndomande+1
+WHERE ID = %d
+""" % chatid)
         cursor.execute("""
         INSERT INTO Domande (titolo)
         VALUES ('%s');
@@ -88,19 +95,53 @@ WHERE ID = %d;
         VALUES (
         %d, (SELECT MAX(ID) FROM Domande), CURDATE());
         """ % chatid)
-        cursor.close()
         self.conn.commit()
         
     def domanda_random(self):
-        cursor = self.conn.cursor()
+        cursor = self.cursor
         cursor.execute("""
-SELECT titolo FROM domande
+SELECT ID, titolo FROM Domande
 WHERE ID NOT IN 
     ( SELECT domanda FROM Risposte
       WHERE flag = true
     );
         """)
-        
+        rows = cursor.fetchall()
+        n = cursor.rowcount
+        rnd = random.randrange(n)
+        return (rows[rnd][0], rows[rnd][1])
+    
+    def inserisci_r(self, chatid, risposta_text, domanda_id):
+        cursor = self.cursor
+        cursor.execute("""
+SELECT ID FROM Utenti
+WHERE ID = %d;
+        """ % chatid)
+        if cursor.fetchone() == None:
+            cursor.execute("""
+            INSERT INTO Utenti (ID, punti, ndomande, nrisposte)
+            VALUES (%d, 0, 0, 1);
+            """ % chatid)
+        else:
+            cursor.execute("""
+UPDATE Utenti
+SET nrisposte = nrisposte+1
+WHERE ID = %d
+""" % chatid)
+        cursor.execute("""
+        INSERT INTO Risposte (testo, valutazione, flag, domanda, utente, data)
+        VALUES ('%s', 0, false, %d, %d, CURDATE())
+        """ % (risposta_text, domanda_id, chatid))
+        self.conn.commit()
+        cursor.execute("""
+SELECT utente FROM Post
+WHERE domanda = %d
+        """ % domanda_id)
+        rows = cursor.fetchall()
+        result = []
+        for r in rows:
+            result.append(r[0])
+        return result
 #    def retrieve(self, )
 
 
@@ -110,6 +151,8 @@ class Conversation:
     CHIEDI = 1
     RISPONDI = 2
     SELEZIONE_DOMANDA = 3
+    SELEZIONE_RISPOSTA = 4
+    INSERIMENTO_RISPOSTA = 5
 
     db = QuestionSearch()
     
@@ -134,6 +177,19 @@ class Conversation:
             self.rispondi(update)
         elif self.states[update.message.chat.id].stato == self.SELEZIONE_DOMANDA:
             self.selezione(update)
+        elif self.states[update.message.chat.id].stato == self.SELEZIONE_RISPOSTA:
+            if update.message.text == "Rispondi":
+                self.states[update.message.chat.id].stato = self.INSERIMENTO_RISPOSTA
+                reply_markup = ReplyKeyboardRemove(selective=False)
+                update.message.reply_text("Inserisci la risposta:", reply_markup=reply_markup)
+            elif update.message.text == "Salta":
+                self.rispondi(update)
+            elif update.message.text == "Menu principale":
+                self.start(bot, update)
+            else:
+                update.message.reply_text("Premi /help per aiuto")
+        elif self.states[update.message.chat.id].stato == self.INSERIMENTO_RISPOSTA:
+            self.ins_r(bot, update)
 
     def chiedi(self, update):
         results = self.db.lookup(update.message.text)
@@ -174,8 +230,20 @@ Sarai notificato se qualcuno risponderà alla tua domanda
             pass
     
     def rispondi(self, update):
-        #domanda scelta casualmente
-        
+        (id_domanda, titolo_domanda) = self.db.domanda_random()
+        keyboard = [[KeyboardButton("Rispondi")],
+                    [KeyboardButton("Salta")],
+                    [KeyboardButton("Menu principale")]]
+        markup = ReplyKeyboardMarkup(keyboard)
+        self.states[update.message.chat.id].stato = self.SELEZIONE_RISPOSTA
+        self.states[update.message.chat.id].domanda = id_domanda
+        update.message.reply_text(titolo_domanda, reply_markup=markup)
+
+    def ins_r(self, bot, update):
+        utenti = self.db.inserisci_r(update.message.chat.id, update.message.text, self.states[update.message.chat.id].domanda)
+        update.message.reply_text("La tua risposta è stata inserita. Grazie!")
+        for u in utenti:
+            bot.sendMessage(u, "Un utente ha risposto alla tua domanda!")
 
     def start(self, bot, update):
         update.message.reply_text("Salve " + update.message.from_user.first_name)
@@ -188,7 +256,7 @@ Sarai notificato se qualcuno risponderà alla tua domanda
         self.states[update.message.chat.id] = Status()
         
     def help(self, bot, update):
-        update.message.reply_text("/problems -> Chiedi domanda - Fai domanda")
+        update.message.reply_text("/start per il menu principale")
 
 def main():
     
