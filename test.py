@@ -36,8 +36,9 @@ class Status:
     stato = 0
 
 class QuestionSearch:
-    conn = MySQLdb.connect("localhost", port=3306, user="gianmarco", passwd="", db="bot")
-    cursor = conn.cursor()
+    def __init__(self):
+        self.conn = MySQLdb.connect("localhost", port=3306, user="gianmarco", passwd="", db="bot")
+        self.cursor = self.conn.cursor()
     def lookup(self, title):
         cursor= self.cursor
         matches = {}
@@ -190,13 +191,13 @@ WHERE Domande.titolo = '%s';
         """ %  text)
         i = cursor.fetchone()[0]
         cursor.execute("""
-        SELECT ID, testo FROM Risposte
+        SELECT ID, testo, flag FROM Risposte
 WHERE domanda = %d;
         """ % i)
         rows = cursor.fetchall()
         result = []
         for r in rows:
-            result.append([r[0], r[1]])
+            result.append([r[0], r[1], r[2]])
         return result
     def register(self, chatid, domanda):
         cursor = self.cursor
@@ -284,7 +285,7 @@ class Conversation:
                 update.message.reply_text("Premi /help per aiuto")
         #gestione stato chiedi: inserimeno della domanda
         elif self.states[update.message.chat.id].stato == self.CHIEDI:
-            self.chiedi(update)
+            self.chiedi(bot, update)
         #gestione stato rispondi: mostra una domanda, chiedi inserimento riposta e mostra tastiera
         elif self.states[update.message.chat.id].stato == self.RISPONDI:
             self.rispondi(update)
@@ -308,8 +309,11 @@ class Conversation:
             if len(res) == 0:
                 update.message.reply_text("Non sono presenti risposte per questa domanda")
             for i, r in enumerate(res):
-                update.message.reply_text(repr(i) + ". " + r[1])
-            markup = ReplyKeyboardRemove(selective = False)
+                if r[2] == True:
+                    update.message.reply_text(repr(i) + ". " + r[1] + "✅")
+                else:
+                    update.message.reply_text(repr(i) + ". " + r[1])
+                markup = ReplyKeyboardRemove(selective = False)
             update.message.reply_text("Inserisci il numero della risposta che ti soddisfa per chiudere il topic o /start per tornare al menu principale", reply_markup=markup)
             self.states[update.message.chat.id].stato = self.BEST
             self.states[update.message.chat.id].risposte = res
@@ -327,7 +331,7 @@ class Conversation:
         else:
             self.start2(bot, update)
 
-    def chiedi(self, update):
+    def chiedi(self, bot, update):
         results = self.db.lookup(update.message.text)
         if len(results) > 0:
             message = """Sono state trovate alcune domande simili alla tua.
@@ -350,6 +354,7 @@ Sarai notificato se qualcuno risponderà alla tua domanda
 """
             self.db.insert(update.message.chat.id, update.message.text)
             update.message.reply_text(message)
+            self.start2(bot, update)
 
     def selezione(self, bot, update):
         if update.message.text == "AGGIUNGI":
@@ -360,7 +365,7 @@ Sarai notificato se qualcuno risponderà alla tua domanda
             self.db.insert(update.message.chat.id, self.states[update.message.chat.id].messaggio)
             reply_markup = ReplyKeyboardRemove(selective=False)
             update.message.reply_text(message, reply_markup=reply_markup)
-            
+            self.start2(bot, update)
         else:
             res = self.db.retrieve(update.message.text)
             if len(res) == 0:
