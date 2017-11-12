@@ -47,8 +47,8 @@ class QuestionSearch:
             cursor.execute("""
 SELECT ID FROM Domande
             WHERE MATCH (titolo, testo)
-            AGAINST ('%s' IN NATURAL LANGUAGE MODE);
-            """ % title)
+            AGAINST ("%s" IN NATURAL LANGUAGE MODE);
+            """ % MySQLdb.escape_string(w))
             rows = cursor.fetchall()
             for row in rows:
                 if row[0] not in matches:
@@ -89,8 +89,8 @@ WHERE ID = %d
 """ % chatid)
         cursor.execute("""
         INSERT INTO Domande (titolo)
-        VALUES ('%s');
-        """ % text)
+        VALUES ("%s");
+        """ % MySQLdb.escape_string(text))
         cursor.execute("""
         INSERT INTO Post (utente, domanda, data)
         VALUES (
@@ -131,8 +131,8 @@ WHERE ID = %d
 """ % chatid)
         cursor.execute("""
         INSERT INTO Risposte (testo, valutazione, flag, domanda, utente, data)
-        VALUES ('%s', 0, false, %d, %d, CURDATE())
-        """ % (risposta_text, domanda_id, chatid))
+        VALUES ("%s", 0, false, %d, %d, CURDATE());
+        """ % (MySQLdb.escape_string(risposta_text), domanda_id, chatid))
         self.conn.commit()
         cursor.execute("""
 SELECT titolo FROM Domande
@@ -142,7 +142,7 @@ WHERE ID = %d
         domanda_text = res[0]
         cursor.execute("""
 SELECT utente FROM Post
-WHERE domanda = %d
+WHERE domanda = %d;
         """ % domanda_id)
         rows = cursor.fetchall()
         result = []
@@ -154,7 +154,7 @@ WHERE domanda = %d
         cursor.execute("""
 UPDATE Utenti
 SET punti = punti + %d
-WHERE ID = %d
+WHERE ID = %d;
         """ % (punti, chatid))
         self.conn.commit()
         return
@@ -163,7 +163,7 @@ WHERE ID = %d
         cursor = self.cursor
         cursor.execute("""
 SELECT punti FROM Utenti
-WHERE ID = %d
+WHERE ID = %d;
         """ % chatid)
         r = cursor.fetchone()
         if r == None:
@@ -187,8 +187,8 @@ AND Post.utente = %d;
         cursor = self.cursor
         cursor.execute("""
         SELECT ID FROM Domande
-WHERE Domande.titolo = '%s';
-        """ %  text)
+WHERE Domande.titolo = "%s";
+        """ %  MySQLdb.escape_string(text))
         i = cursor.fetchone()[0]
         cursor.execute("""
         SELECT ID, testo, flag FROM Risposte
@@ -204,13 +204,13 @@ WHERE domanda = %d;
         cursor.execute("""
         SELECT Domande.ID FROM Domande, Post
 WHERE Domande.ID = Post.domanda
-AND Domande.titolo = '%s';
-        """ %  domanda)
+AND Domande.titolo = "%s";
+        """ %  MySQLdb.escape_string(domanda))
         i = cursor.fetchone()[0]
         try:
             cursor.execute("""
         INSERT INTO Post (utente, domanda, data)
-        VALUES (%d, %d, CURDATE())
+        VALUES (%d, %d, CURDATE());
             """ % (chatid, i))
             self.conn.commit()
         except MySQLdb._mysql_exceptions.IntegrityError:
