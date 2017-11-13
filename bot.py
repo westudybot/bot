@@ -445,7 +445,7 @@ def main():
     config = toml.load(open("config.toml"))
     updater = Updater(config["token"])
 
-    connection = MySQLdb.connect("localhost"config["host"], port=config["port"], user=config["user"], passwd=config["passwd"], db=config["db"])
+    connection = MySQLdb.connect(config["host"], port=config["port"], user=config["user"], passwd=config["passwd"], db=config["db"])
     qs = QuestionSearch(connection)
     # Creazione del dispatcher, a cui verranno assegnati i metodi di risposta
     dp = updater.dispatcher
