@@ -23,6 +23,7 @@ from http import client as http
 import MySQLdb
 import operator
 import random
+import toml
 
 import logging
 
@@ -36,8 +37,8 @@ class Status:
     stato = 0
 
 class QuestionSearch:
-    def __init__(self):
-        self.conn = MySQLdb.connect("localhost", port=3306, user="gianmarco", passwd="", db="bot")
+    def __init__(self, connection):
+        self.conn = connection
         self.cursor = self.conn.cursor()
     def lookup(self, title):
         cursor= self.cursor
@@ -246,8 +247,8 @@ class Conversation:
     MOSTRA_RISPOSTE = 6
     BEST = 7
 
-    db = QuestionSearch()
-
+    def __init__(self, db):
+        self.db = db
     #gestione stati
     def messages_handler(self, bot, update):
         #stato indefinito
@@ -441,13 +442,15 @@ Sono state trovate le seguenti risposte al tuo quesito
         update.message.reply_text("/start per il menu principale")
 
 def main():
-    
-    updater = Updater("493355727:AAGLJSKPNRod7zflj1pD23EQxiUoDRqivnA")
-    
+    config = toml.load(open("config.toml"))
+    updater = Updater(config["token"])
+
+    connection = MySQLdb.connect("localhost"config["host"], port=config["port"], user=config["user"], passwd=config["passwd"], db=config["db"])
+    qs = QuestionSearch(connection)
     # Creazione del dispatcher, a cui verranno assegnati i metodi di risposta
     dp = updater.dispatcher
 
-    c = Conversation()
+    c = Conversation(qs)
     
     # Gestione messaegi ricevuti
     dp.add_handler(MessageHandler(Filters.text, c.messages_handler))
